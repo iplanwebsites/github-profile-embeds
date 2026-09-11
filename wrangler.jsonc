@@ -1,0 +1,43 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "github-summary",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-10",
+  "rules": [
+    {
+      "type": "Text",
+      "globs": ["**/*.html"],
+      "fallthrough": true
+    }
+  ],
+  "vars": {
+    "ENVIRONMENT": "development"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "USERS",
+      "id": "29d792e98f0e44579d52bc7017206280"
+    }
+  ],
+  "env": {
+    "production": {
+      "name": "github-summary",
+      "workers_dev": false,
+      "routes": [
+        {
+          "pattern": "github-summary.cookskill.dev",
+          "custom_domain": true
+        }
+      ],
+      "vars": {
+        "ENVIRONMENT": "production"
+      },
+      "kv_namespaces": [
+        {
+          "binding": "USERS",
+          "id": "29d792e98f0e44579d52bc7017206280"
+        }
+      ]
+    }
+  }
+}
