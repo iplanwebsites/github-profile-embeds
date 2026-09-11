@@ -24,7 +24,7 @@ type WaitUntilContext = {
 
 const app = new Hono<{ Bindings: Bindings }>()
 const CACHE_SECONDS = 86400
-const RENDERER_CACHE_VERSION = '3'
+const RENDERER_CACHE_VERSION = '4'
 let demoCalendar: ReturnType<typeof parseContributionHtml> | undefined
 
 function imageHeaders(development: boolean): Headers {

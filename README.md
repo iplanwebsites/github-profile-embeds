@@ -1,66 +1,93 @@
-# github-iso
+# GitHub Summary ✨
 
-A Hono-powered Cloudflare Worker that loads a public GitHub profile, follows GitHub's contribution-calendar fragment, and renders the last year of contributions as an isometric SVG. The SVG can be embedded directly in a GitHub README.
+Turn a GitHub contribution graph into a tiny isometric city: every day is a cube, busy days grow taller, and the whole thing arrives as an SVG that GitHub can display in a README.
 
-The original browser extension is preserved under [`reference/isometric-contributions`](reference/isometric-contributions). It renders into a browser canvas with Obelisk.js. This worker uses the same core idea—one cube per day, with height proportional to the exact contribution count—but emits SVG so it can run at the edge without a browser or native graphics dependency.
+![Example GitHub contribution summary](iplanwebsites.svg)
 
-## Develop
+This repository is a Cloudflare Worker built with [Hono](https://hono.dev/). It is designed to be a template you can deploy under your own Cloudflare account and domain.
+
+## The original spark
+
+The visual idea comes from Jason Long’s original [isometric-contributions GitHub Chrome extension](https://github.com/jasonlong/isometric-contributions). That project runs inside the GitHub profile page and swaps the normal contribution grid for an Obelisk.js canvas. This project is a separate, server-rendered version for README embeds: it borrows the isometric spirit, but emits a self-contained SVG from a Worker at the edge.
+
+## How the whole thing works
+
+1. A request arrives at `/profile/:handle`, or at a generated `/user/:hash/:secret` URL.
+2. The Worker fetches the public GitHub profile page.
+3. GitHub lazy-loads the contribution graph through an `include-fragment`. The Worker discovers that fragment URL instead of hard-coding a calendar endpoint.
+4. It requests the fragment with `X-Requested-With: XMLHttpRequest`, which returns the contribution table.
+5. The parser reads each day’s `data-date`, week index, intensity level, and accessible tooltip. The tooltip supplies the exact contribution count, including zero days.
+6. Statistics are calculated from those days: total, weekly total, best day, median contributions per day, active-day average, active days per week, activity percentage, and streaks with date ranges.
+7. The renderer draws three SVG faces per day—top, left, and right—with height proportional to the count. No browser, canvas, native image library, or GitHub token is required.
+8. Production responses are cached for 24 hours. Add any query parameter such as `?v=2026-09-11` to create a new cache key and force a fresh upstream read.
+
+The `/demo` route follows the exact same parser and renderer, but reads the frozen `iplanwebsites` response bundled in [`test/fixtures`](test/fixtures) so it is deterministic and never contacts GitHub.
+
+## Run it locally
 
 ```sh
 npm install
 npm run dev
 ```
 
-Open `http://localhost:8787/profile/octocat` or use dark mode with `http://localhost:8787/profile/octocat?theme=dark`.
+Useful local URLs:
 
-Development defaults to `ENVIRONMENT=development`. Every image request refetches the profile and contribution fragment from GitHub, and responses use `Cache-Control: no-store`.
+```text
+http://localhost:8787/demo
+http://localhost:8787/demo?theme=dark
+http://localhost:8787/profile/octocat
+http://localhost:8787/profile/octocat?theme=dark&v=refresh
+```
 
-## Deploy
+Development uses `ENVIRONMENT=development`, refetches remote data on every image request, and sends `Cache-Control: no-store`.
+
+## Deploy your own version
+
+Please deploy your own Worker, KV namespace, and hostname rather than relying on the hosted demo. The production configuration in [`wrangler.jsonc`](wrangler.jsonc) is intentionally easy to adapt:
 
 ```sh
+npm install
+npx wrangler login
+npx wrangler kv namespace create USERS --env production
 npm run deploy
 ```
 
-Production images carry `Cache-Control: public, max-age=86400, s-maxage=86400` and are stored in Cloudflare's Cache API for 24 hours. Any query string creates a separate cache key and bypasses the upstream GitHub HTML cache, so `?v=TIMESTAMP` forces a fresh render.
+Before deploying, replace the production KV namespace ID and `github-summary.cookskill.dev` custom-domain route in `wrangler.jsonc` with resources from your own Cloudflare account. You can also remove the custom-domain route and use your own `workers.dev` hostname. The custom-domain configuration follows Cloudflare’s [Workers Custom Domains](https://developers.cloudflare.com/workers/configuration/routing/custom-domains/) model, and the username lookup uses a [Workers KV binding](https://developers.cloudflare.com/kv/concepts/kv-bindings/).
 
-Embed a deployed image in a GitHub README:
+After deployment, your own README embed can be as simple as:
 
 ```md
-![GitHub contribution summary](https://github-summary.cookskill.dev/profile/octocat)
+![GitHub contributions](https://YOUR-DOMAIN.example/profile/your-github-handle?v=2026-09-11)
 ```
 
-## Create a shareable URL
-
-The homepage at `https://github-summary.cookskill.dev` accepts a GitHub username and returns a capability URL shaped like:
-
-```text
-/user/:sha256-username-hash/:random-secret
-```
-
-The one-way hash cannot recover the username, so Workers KV stores the mapping. Anyone with the generated URL can view and embed the public contribution summary; the random secret is part of that shareable URL and is not a GitHub credential.
+The hosted demonstration is available at [github-summary.cookskill.dev](https://github-summary.cookskill.dev), but it is not a dependency of this repository.
 
 ## Routes
 
-- `GET /demo` and `GET /demo.svg` render the frozen `iplanwebsites` fixture without contacting GitHub.
-- `GET /profile/:handle` renders a profile directly without creating a URL.
-- `GET /profile/handle/:handle` is an equivalent explicit alias.
-- `GET /user/:hash/:secret` renders a created summary URL.
-- Add `?theme=dark` for dark mode or `?v=anything` to bust the current cache.
-- `POST /api/users` with `{"username":"octocat"}` creates a summary URL.
+- `GET /demo` and `GET /demo.svg` render the frozen local fixture.
+- `GET /profile/:handle` renders a live public profile directly.
+- `GET /profile/handle/:handle` is an explicit alias for the same live route.
+- `GET /user/:hash/:secret` renders a generated capability URL.
+- `POST /api/users` with `{"username":"octocat"}` verifies the public profile and creates a shareable URL.
+- `GET /` provides the small URL-creation homepage.
 - `GET /health` returns a health response.
+- `?theme=dark` selects the dark palette; any `?v=...` value busts the current cache key.
 
-Only public contribution data visible on the GitHub profile is available; private contributions are not exposed to this unauthenticated worker.
+The generated URL stores a SHA-256 username hash and a random secret in its path. Workers KV maps that capability back to the username. The URL is shareable, and the random segment is an access link—not a GitHub credential.
 
-Each chart includes total contributions, active days, activity percentage, median contributions per calendar and active day, average contributions per active day, average active days per week, longest streak, current streak, and the highest daily count. These are GitHub contributions, not necessarily Git commits; GitHub's graph can also include issues, pull requests, and reviews.
+## Testing and fixtures
 
-The current static example for `iplanwebsites` is [`iplanwebsites.svg`](iplanwebsites.svg).
+```sh
+npm test
+npm run typecheck
+```
 
-## Test fixture
+The parser tests use frozen public responses in [`test/fixtures/iplanwebsites-profile.html`](test/fixtures/iplanwebsites-profile.html) and [`test/fixtures/iplanwebsites-contributions.html`](test/fixtures/iplanwebsites-contributions.html). This gives us a realistic regression feed without making tests dependent on GitHub availability or changing contribution counts.
 
-The exact public GitHub responses used for the `iplanwebsites` example are frozen in [`test/fixtures/iplanwebsites-profile.html`](test/fixtures/iplanwebsites-profile.html) and [`test/fixtures/iplanwebsites-contributions.html`](test/fixtures/iplanwebsites-contributions.html). Parser and statistic regression tests use these files locally and never need the network.
+## Privacy, security, and attribution
 
-## Upstream survey
+This Worker only reads unauthenticated public GitHub profile data. It does not log in to GitHub and does not contain a GitHub API token. The generated URL is a capability link, so treat it like any other shareable image URL.
 
-GitHub's profile HTML currently contains an `include-fragment` whose `src` points back to the contributions tab. The worker deliberately loads the profile first, discovers that URL, then requests it with `X-Requested-With: XMLHttpRequest`. The returned table supplies `data-date`, week index, intensity level, and accessible tooltips containing exact contribution counts.
+The repository was checked for credential-shaped values, private-key blocks, environment files, and credential files in both the Worker history and the nested reference checkout. No such secrets are committed. The fixture files contain public GitHub HTML used for deterministic tests; GitHub’s public UI signatures and markup are not authentication credentials.
 
-The reference extension is MIT licensed; see its bundled [`LICENSE`](reference/isometric-contributions/LICENSE).
+The upstream extension copy under [`reference/isometric-contributions`](reference/isometric-contributions) retains its original MIT license in [`LICENSE`](reference/isometric-contributions/LICENSE). This Worker is an independent implementation inspired by that project.
