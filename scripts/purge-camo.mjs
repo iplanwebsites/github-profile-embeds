@@ -70,7 +70,8 @@ async function main() {
   const results = await refreshCamoForUsers(usernames, {
     purger: dryRun
       ? async () => ({ status: 0, body: 'dry run' })
-      : curlPurge
+      : curlPurge,
+    refetchAfterPurge: !dryRun
   })
 
   let failed = false
@@ -89,7 +90,9 @@ async function main() {
     if (dryRun) {
       for (const url of result.camoUrls) console.log(`  ${url}`)
     } else {
-      console.log(`[${result.username}] purged ${result.purged.length} Camo URL(s)`)
+      console.log(
+        `[${result.username}] purged ${result.purged.length} and re-fetched ${result.refetched.length} Camo URL(s)`
+      )
     }
   }
 

@@ -19,12 +19,15 @@ export interface CamoPurgeResponse {
 
 export interface CamoRefreshResult extends CamoDiscovery {
   purged: Array<{ url: string; status: number; body: string }>
+  refetched: Array<{ url: string; status: number }>
   error?: string
 }
 
 export interface CamoRefreshOptions {
   fetcher?: typeof fetch
   purger?: (url: string) => Promise<CamoPurgeResponse>
+  beforePurge?: (discovery: CamoDiscovery) => Promise<void>
+  refetchAfterPurge?: boolean
 }
 
 function errorMessage(error: unknown): string {
@@ -128,6 +131,22 @@ export async function purgeCamoUrl(
   return { status: response.status, body }
 }
 
+async function refetchCamoUrl(url: string, fetcher: typeof fetch): Promise<number> {
+  const normalized = normalizeCamoUrl(url)
+  if (!normalized) throw new Error(`Refusing to fetch a non-Camo URL: ${url}`)
+
+  const response = await fetcher(normalized, {
+    method: 'GET',
+    headers: { 'User-Agent': USER_AGENT },
+    cache: 'no-store'
+  })
+  if (!response.ok) throw new Error(`Camo refresh failed (${response.status})`)
+
+  // Consume the complete response so the proxy can finish repopulating its cache.
+  await response.arrayBuffer()
+  return response.status
+}
+
 /**
  * Discovers and purges every Camo image URL visible on each requested profile.
  * A failed user is returned as a result so a scheduled run can continue with
@@ -145,22 +164,28 @@ export async function refreshCamoForUsers(
   for (const username of [...new Set(usernames.map((value) => value.trim()).filter(Boolean))]) {
     try {
       const discovery = await discoverCamoUrls(username, fetcher)
+      await options.beforePurge?.(discovery)
       const purged: CamoRefreshResult['purged'] = []
+      const refetched: CamoRefreshResult['refetched'] = []
 
       for (const url of discovery.camoUrls) {
         if (seenCamoUrls.has(url)) continue
         seenCamoUrls.add(url)
         const response = await purger(url)
         purged.push({ url, ...response })
+        if (options.refetchAfterPurge !== false) {
+          refetched.push({ url, status: await refetchCamoUrl(url, fetcher) })
+        }
       }
 
-      results.push({ ...discovery, purged })
+      results.push({ ...discovery, purged, refetched })
     } catch (error) {
       results.push({
         username,
         profileUrl: `https://github.com/${encodeURIComponent(username)}`,
         camoUrls: [],
         purged: [],
+        refetched: [],
         error: errorMessage(error)
       })
     }

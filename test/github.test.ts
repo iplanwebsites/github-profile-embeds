@@ -85,7 +85,9 @@ describe('Camo refresh support', () => {
 
     expect(results).toHaveLength(2)
     expect(results[0].purged).toHaveLength(1)
+    expect(results[0].refetched).toHaveLength(1)
     expect(results[1].purged).toHaveLength(0)
+    expect(results[1].refetched).toHaveLength(0)
     expect(purged).toEqual([camoUrl])
   })
 })

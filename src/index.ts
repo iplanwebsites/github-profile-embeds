@@ -9,6 +9,7 @@ import {
   configuredUsernames,
   decodeCamoSourceUrl,
   refreshCamoForUsers,
+  type CamoDiscovery,
   type CamoRefreshResult
 } from './camo'
 import { renderContributionSvg, renderErrorSvg } from './render'
@@ -179,14 +180,14 @@ function isRefreshableImageUrl(source: URL, publicBaseUrl: string): boolean {
 }
 
 async function warmScheduledImageCaches(
-  results: CamoRefreshResult[],
+  discoveries: CamoDiscovery[],
   publicBaseUrl: string | undefined
 ): Promise<void> {
   if (!publicBaseUrl) return
 
   const cache = caches.default
-  for (const result of results) {
-    if (result.error || result.camoUrls.length === 0) continue
+  for (const result of discoveries) {
+    if (result.camoUrls.length === 0) continue
 
     let calendar: ReturnType<typeof parseContributionHtml>
     try {
@@ -227,16 +228,18 @@ export async function refreshConfiguredCamoUsers(env: Bindings): Promise<CamoRef
     return []
   }
 
-  const results = await refreshCamoForUsers(usernames)
+  const results = await refreshCamoForUsers(usernames, {
+    beforePurge: (discovery) => warmScheduledImageCaches([discovery], env.PUBLIC_BASE_URL)
+  })
   for (const result of results) {
     if (result.error) {
       console.error(`[${result.username}] ${result.error}`)
     } else {
-      console.log(`[${result.username}] purged ${result.purged.length}/${result.camoUrls.length} Camo URL(s)`)
+      console.log(
+        `[${result.username}] purged ${result.purged.length} and re-fetched ${result.refetched.length}/${result.camoUrls.length} Camo URL(s)`
+      )
     }
   }
-
-  await warmScheduledImageCaches(results, env.PUBLIC_BASE_URL)
   return results
 }
 

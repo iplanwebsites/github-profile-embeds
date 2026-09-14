@@ -64,7 +64,7 @@ The hosted demonstration is available at [github-summary.cookskill.dev](https://
 
 ## Refreshing GitHub's Camo image cache
 
-GitHub rewrites externally hosted README images through [Camo](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-anonymized-urls). Camo can keep serving an older image after the source data changes. This repository includes a local CLI that fetches a public GitHub profile, discovers the exact `camo.githubusercontent.com` URLs currently rendered there, and purges those URLs with `curl --request PURGE`.
+GitHub rewrites externally hosted README images through [Camo](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-anonymized-urls). Camo can keep serving an older image after the source data changes. This repository includes a local CLI that fetches a public GitHub profile, discovers the exact `camo.githubusercontent.com` URLs currently rendered there, purges those URLs with `curl --request PURGE`, and immediately fetches them again to repopulate Camo with the current source response.
 
 Use it for one or more profiles:
 
@@ -84,7 +84,7 @@ import { refreshCamoForUsers } from './src/camo.ts'
 const results = await refreshCamoForUsers(['iplanwebsites', 'another-user'])
 ```
 
-The production Worker is configured to run this refresh once per day at `00:00` UTC. Edit the comma- or whitespace-separated `CAMO_USERS` value in [`wrangler.jsonc`](wrangler.jsonc) to maintain the list of profiles. The scheduled Worker uses an equivalent `PURGE` request through `fetch`, then refreshes this Worker's own rendered-image cache so a subsequent Camo request receives current contribution data.
+The production Worker is configured to run this refresh once per day at `00:00` UTC. Edit the comma- or whitespace-separated `CAMO_USERS` value in [`wrangler.jsonc`](wrangler.jsonc) to maintain the list of profiles. The scheduled Worker first refreshes this Worker's own rendered-image cache, then uses an equivalent `PURGE` request through `fetch` and immediately re-fetches the Camo image. No manual command or README commit is required for later daily runs.
 
 ### Embedding limitations
 
