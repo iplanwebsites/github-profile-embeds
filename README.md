@@ -62,6 +62,37 @@ After deployment, your own README embed can be as simple as:
 
 The hosted demonstration is available at [github-summary.cookskill.dev](https://github-summary.cookskill.dev), but it is not a dependency of this repository.
 
+## Refreshing GitHub's Camo image cache
+
+GitHub rewrites externally hosted README images through [Camo](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/about-anonymized-urls). Camo can keep serving an older image after the source data changes. This repository includes a local CLI that fetches a public GitHub profile, discovers the exact `camo.githubusercontent.com` URLs currently rendered there, and purges those URLs with `curl --request PURGE`.
+
+Use it for one or more profiles:
+
+```sh
+npm run camo:purge -- iplanwebsites
+npm run camo:purge -- --users iplanwebsites,another-user
+npm run camo:purge -- --dry-run iplanwebsites
+```
+
+The CLI accepts positional usernames, repeatable `--user` options, or `GITHUB_USERS`/`CAMO_USERS` when no arguments are supplied. It never accepts an arbitrary purge URL; only HTTPS URLs on `camo.githubusercontent.com` discovered in GitHub's profile HTML are eligible.
+
+The same operation is available as an import for Node.js scripts. The repository's CLI uses Node.js type stripping, so use Node.js 22.6+:
+
+```ts
+import { refreshCamoForUsers } from './src/camo.ts'
+
+const results = await refreshCamoForUsers(['iplanwebsites', 'another-user'])
+```
+
+The production Worker is configured to run this refresh once per day at `00:00` UTC. Edit the comma- or whitespace-separated `CAMO_USERS` value in [`wrangler.jsonc`](wrangler.jsonc) to maintain the list of profiles. The scheduled Worker uses an equivalent `PURGE` request through `fetch`, then refreshes this Worker's own rendered-image cache so a subsequent Camo request receives current contribution data.
+
+### Embedding limitations
+
+- Discovery only sees images present in the unauthenticated, server-rendered HTML for `https://github.com/<username>`. Images added only after client-side JavaScript runs, private profile content, and images hidden from that response cannot be discovered.
+- The job purges every Camo image visible on each configured profile, not just one hard-coded image. A profile with many external images may therefore produce several purge requests.
+- Purging is a cache operation; it does not change the source image or guarantee that every browser updates at exactly the same instant. Source `Cache-Control` headers and GitHub's own delivery layers still apply.
+- GitHub recommends using Camo purge sparingly. Prefer a stable image URL and this daily refresh only for generated images whose source data changes without a README commit.
+
 ## Routes
 
 - `GET /demo` and `GET /demo.svg` render the frozen local fixture.
@@ -72,6 +103,7 @@ The hosted demonstration is available at [github-summary.cookskill.dev](https://
 - `GET /` provides the small URL-creation homepage.
 - `GET /health` returns a health response.
 - `?theme=dark` selects the dark palette; any `?v=...` value busts the current cache key.
+- The production scheduled handler refreshes configured Camo images daily; it is not exposed as a public HTTP purge endpoint.
 
 The generated URL stores a SHA-256 username hash and a random secret in its path. Workers KV maps that capability back to the username. The URL is shareable, and the random segment is an access link—not a GitHub credential.
 

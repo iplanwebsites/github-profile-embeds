@@ -3,6 +3,9 @@
   "name": "github-summary",
   "main": "src/index.ts",
   "compatibility_date": "2026-09-10",
+  "triggers": {
+    "crons": ["0 0 * * *"]
+  },
   "rules": [
     {
       "type": "Text",
@@ -30,7 +33,9 @@
         }
       ],
       "vars": {
-        "ENVIRONMENT": "production"
+        "ENVIRONMENT": "production",
+        "CAMO_USERS": "iplanwebsites",
+        "PUBLIC_BASE_URL": "https://github-summary.cookskill.dev"
       },
       "kv_namespaces": [
         {

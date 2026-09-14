@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { configuredUsernames, decodeCamoSourceUrl, extractCamoUrls, refreshCamoForUsers } from '../src/camo'
 import { findContributionFragment, isValidUsername, parseContributionHtml } from '../src/github'
 import { calculateStatistics, renderContributionSvg } from '../src/render'
 import contributionFixture from './fixtures/iplanwebsites-contributions.html?raw'
@@ -52,6 +53,40 @@ describe('GitHub profile parsing', () => {
     expect(calendar.max).toBe(292)
     expect(calendar.from).toBe('2025-09-07')
     expect(calendar.to).toBe('2026-09-11')
+  })
+})
+
+describe('Camo refresh support', () => {
+  const camoUrl = 'https://camo.githubusercontent.com/abc123/68747470733a2f2f6578616d706c652e636f6d2f7374617475732e737667'
+
+  it('extracts and decodes Camo URLs from profile HTML', () => {
+    const html = `<img src="${camoUrl}"><img src="${camoUrl}">`
+    expect(extractCamoUrls(html)).toEqual([camoUrl])
+    expect(decodeCamoSourceUrl(camoUrl)?.toString()).toBe('https://example.com/status.svg')
+  })
+
+  it('parses a reusable configured username list', () => {
+    expect(configuredUsernames('iplanwebsites, another-user invalid/name iplanwebsites')).toEqual([
+      'iplanwebsites',
+      'another-user'
+    ])
+  })
+
+  it('discovers and purges each unique Camo URL', async () => {
+    const purged: string[] = []
+    const fetcher = async () => new Response(`<img src="${camoUrl}">`)
+    const results = await refreshCamoForUsers(['alice', 'bob'], {
+      fetcher,
+      purger: async (url) => {
+        purged.push(url)
+        return { status: 200, body: '{"status":"ok"}' }
+      }
+    })
+
+    expect(results).toHaveLength(2)
+    expect(results[0].purged).toHaveLength(1)
+    expect(results[1].purged).toHaveLength(0)
+    expect(purged).toEqual([camoUrl])
   })
 })
 

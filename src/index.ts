@@ -5,12 +5,20 @@ import {
   isValidUsername,
   parseContributionHtml
 } from './github'
+import {
+  configuredUsernames,
+  decodeCamoSourceUrl,
+  refreshCamoForUsers,
+  type CamoRefreshResult
+} from './camo'
 import { renderContributionSvg, renderErrorSvg } from './render'
 import staticContributionHtml from '../test/fixtures/iplanwebsites-contributions.html'
 
 type Bindings = {
   ENVIRONMENT?: string
   USERS: KVNamespace
+  CAMO_USERS?: string
+  PUBLIC_BASE_URL?: string
 }
 
 type UserRecord = {
@@ -150,6 +158,96 @@ async function demoImageResponse(
   )
   if (!development) executionCtx.waitUntil(cache.put(cacheKey, response.clone()))
   return request.method === 'HEAD' ? new Response(null, response) : response
+}
+
+function imageCacheKey(url: URL): Request {
+  const cacheUrl = new URL(url)
+  cacheUrl.searchParams.set('__renderer', RENDERER_CACHE_VERSION)
+  return new Request(cacheUrl.toString(), { method: 'GET' })
+}
+
+function isRefreshableImageUrl(source: URL, publicBaseUrl: string): boolean {
+  let base: URL
+  try {
+    base = new URL(publicBaseUrl)
+  } catch {
+    return false
+  }
+
+  if (source.origin !== base.origin) return false
+  return source.pathname.startsWith('/profile/') || source.pathname.startsWith('/user/')
+}
+
+async function warmScheduledImageCaches(
+  results: CamoRefreshResult[],
+  publicBaseUrl: string | undefined
+): Promise<void> {
+  if (!publicBaseUrl) return
+
+  const cache = caches.default
+  for (const result of results) {
+    if (result.error || result.camoUrls.length === 0) continue
+
+    let calendar: ReturnType<typeof parseContributionHtml>
+    try {
+      // The scheduled path deliberately bypasses the Worker and GitHub edge
+      // caches so the next Camo request receives the current contribution data.
+      calendar = await fetchContributionCalendar(result.username, true)
+    } catch (error) {
+      console.error(`[${result.username}] could not warm rendered image cache`, error)
+      continue
+    }
+
+    const sourceUrls = result.camoUrls
+      .map(decodeCamoSourceUrl)
+      .filter((source): source is URL => Boolean(source))
+      .filter((source) => isRefreshableImageUrl(source, publicBaseUrl))
+
+    const canonical = new URL(`/profile/${encodeURIComponent(result.username)}`, publicBaseUrl)
+    const urls = sourceUrls.length > 0 ? sourceUrls : [canonical]
+    const warmed = new Set<string>()
+
+    for (const source of urls) {
+      const key = imageCacheKey(source)
+      if (warmed.has(key.url)) continue
+      warmed.add(key.url)
+      const theme = source.searchParams.get('theme') === 'dark' ? 'dark' : 'light'
+      const response = new Response(renderContributionSvg(result.username, calendar, theme), {
+        headers: imageHeaders(false)
+      })
+      await cache.put(key, response)
+    }
+  }
+}
+
+export async function refreshConfiguredCamoUsers(env: Bindings): Promise<CamoRefreshResult[]> {
+  const usernames = configuredUsernames(env.CAMO_USERS)
+  if (usernames.length === 0) {
+    console.warn('CAMO_USERS is empty; skipping scheduled Camo refresh')
+    return []
+  }
+
+  const results = await refreshCamoForUsers(usernames)
+  for (const result of results) {
+    if (result.error) {
+      console.error(`[${result.username}] ${result.error}`)
+    } else {
+      console.log(`[${result.username}] purged ${result.purged.length}/${result.camoUrls.length} Camo URL(s)`)
+    }
+  }
+
+  await warmScheduledImageCaches(results, env.PUBLIC_BASE_URL)
+  return results
+}
+
+export async function scheduled(
+  _event: ScheduledEvent,
+  env: Bindings,
+  ctx: ExecutionContext
+): Promise<void> {
+  const task = refreshConfiguredCamoUsers(env)
+  ctx.waitUntil(task)
+  await task
 }
 
 app.get('/', (c) => c.html(homepage(), 200, { 'Cache-Control': 'no-store' }))
